@@ -90,7 +90,10 @@ export default function App() {
           {preview ?
             <img src={preview} style={styles.preview}/>
             :
-            <p>Click to Upload Leaf Image</p>
+            <p style={{opacity:0.8}}>
+  📁 Click or Drop Leaf Image Here
+</p>
+
           }
         </label>
 
@@ -180,18 +183,28 @@ const styles = {
     overflowY:"auto"
   },
 
-  uploadBox:{
-    border:"2px dashed #38bdf8",
-    borderRadius:"12px",
-    padding:"20px",
-    cursor:"pointer",
-    margin:"20px 0"
-  },
+ uploadBox:{
+  border:"2px dashed #38bdf8",
+  borderRadius:"14px",
+  height:"260px",
+  display:"flex",
+  alignItems:"center",
+  justifyContent:"center",
+  flexDirection:"column",
+  cursor:"pointer",
+  margin:"25px 0",
+  transition:"0.3s ease",
+  background:"rgba(56,189,248,0.05)"
+},
+
 
   preview:{
-    width:"100%",
-    borderRadius:"10px"
-  },
+  width:"100%",
+  height:"100%",
+  objectFit:"cover",
+  borderRadius:"12px"
+},
+
 
   button:{
     padding:"12px 20px",
