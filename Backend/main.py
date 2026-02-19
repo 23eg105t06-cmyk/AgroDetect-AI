@@ -8,6 +8,10 @@ import cv2
 import base64
 import json
 
+# =============================
+# FASTAPI SETUP
+# =============================
+
 app = FastAPI()
 
 app.add_middleware(
@@ -28,6 +32,23 @@ with open("class_names.json") as f:
     class_names = json.load(f)
 
 # =============================
+# FIND LAST CONV LAYER (SAFE)
+# =============================
+
+from tensorflow.keras.layers import Conv2D, DepthwiseConv2D, SeparableConv2D
+
+def get_last_conv_layer(model):
+
+    for layer in reversed(model.layers):
+
+        if isinstance(layer, (Conv2D, DepthwiseConv2D, SeparableConv2D)):
+            return layer.name
+
+    raise ValueError("No convolution layer found")
+
+last_conv_layer_name = get_last_conv_layer(model)
+
+# =============================
 # PREPROCESS
 # =============================
 
@@ -40,12 +61,12 @@ def preprocess(image):
     return np.expand_dims(arr,0)
 
 # =============================
-# GRADCAM
+# GRADCAM HEATMAP
 # =============================
 
 def make_gradcam(img_array):
 
-    last_conv_layer = model.get_layer("Conv_1")
+    last_conv_layer = model.get_layer(last_conv_layer_name)
 
     grad_model = tf.keras.models.Model(
         [model.inputs],
@@ -67,14 +88,19 @@ def make_gradcam(img_array):
     heatmap = conv_outputs @ pooled_grads[..., tf.newaxis]
     heatmap = tf.squeeze(heatmap)
 
-    heatmap = np.maximum(heatmap,0) / np.max(heatmap)
+    heatmap = np.maximum(heatmap,0)
 
-    heatmap = cv2.resize(heatmap, (224,224))
+    if np.max(heatmap) != 0:
+        heatmap /= np.max(heatmap)
+
+    heatmap = heatmap.numpy() if hasattr(heatmap, "numpy") else heatmap
+
+    heatmap = cv2.resize(heatmap,(224,224))
 
     return heatmap
 
 # =============================
-# LOCAL AI EXPLANATION ENGINE
+# LOCAL AI EXPLANATION
 # =============================
 
 def generate_ai_text(disease, severity):
@@ -82,16 +108,16 @@ def generate_ai_text(disease, severity):
     disease_name = disease.replace("_"," ")
 
     if severity < 20:
-        level = "low severity"
-        advice = "Monitor plant health and maintain proper watering and sunlight."
-    elif severity <= 50:
-        level = "moderate severity"
-        advice = "Remove affected leaves and improve airflow to prevent spread."
+        level="low severity"
+        advice="Monitor plant health and maintain proper watering and sunlight."
+    elif severity <=50:
+        level="moderate severity"
+        advice="Remove affected leaves and improve airflow to prevent spread."
     else:
-        level = "high severity"
-        advice = "Immediate treatment required. Consider fungicide or professional inspection."
+        level="high severity"
+        advice="Immediate treatment required. Consider fungicide or professional inspection."
 
-    text = f"""
+    return f"""
 AI detected {disease_name}.
 
 Visual patterns indicate possible disease symptoms localized on leaf surface.
@@ -99,18 +125,23 @@ Visual patterns indicate possible disease symptoms localized on leaf surface.
 Severity level appears {level}. {advice}
 """
 
-    return text
+# =============================
+# ROUTES
+# =============================
 
-# =============================
-# API
-# =============================
+@app.get("/")
+def home():
+    return {"message":"AgroDetect AI Backend Running"}
 
 @app.post("/predict")
 async def predict(file: UploadFile = File(...)):
 
     contents = await file.read()
 
-    image = Image.open(io.BytesIO(contents)).convert("RGB")
+    try:
+        image = Image.open(io.BytesIO(contents)).convert("RGB")
+    except:
+        return {"error":"Invalid image"}
 
     processed = preprocess(image)
 
@@ -121,24 +152,23 @@ async def predict(file: UploadFile = File(...)):
     disease = class_names[idx]
     confidence = float(np.max(preds))
 
-    severity = round(confidence * 100)
+    severity = round(confidence*100)
 
     # HEATMAP
     heatmap = make_gradcam(processed)
 
     original = cv2.resize(np.array(image),(224,224))
 
-    heatmap = np.uint8(255 * heatmap)
+    heatmap = np.uint8(255*heatmap)
     heatmap = cv2.applyColorMap(heatmap, cv2.COLORMAP_JET)
 
     overlay = cv2.addWeighted(original,0.6,heatmap,0.4,0)
 
-    _, buffer = cv2.imencode('.jpg', overlay)
+    _,buffer = cv2.imencode('.jpg',overlay)
 
     heatmap_base64 = base64.b64encode(buffer).decode()
 
-    # AI explanation
-    ai_text = generate_ai_text(disease, severity)
+    ai_text = generate_ai_text(disease,severity)
 
     return {
         "disease": disease,
